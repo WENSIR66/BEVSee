@@ -21,6 +21,32 @@ import torchvision
 
 LOG = logging.getLogger(__name__)
 
+'''
+1. mono.forward
+   └── Loco.forward
+       ├── preprocess_monoloco
+       │   ├── get_keypoints
+       │   └── pixel_to_camera
+       ├── LocoModel.forward
+       │   └── MyLinearSimple.forward
+       ├── extract_outputs
+       │   ├── unnormalize_bi
+       │   ├── to_cartesian
+       │   └── back_correct_angles
+       ├── epistemic_uncertainty
+       │   ├── laplace_sampling
+       │   └── unnormalize_bi
+       └── post_process
+           ├── calculate_iou
+           ├── xyz_from_distance
+           ├── get_iou_matches
+           └── reorder_matches
+
+2. predict_new_clear_before
+   └── preprocess_pifpaf
+'''
+
+
 
 class mono(nn.Module):
     def __init__(self, device=torch.device('cuda:0'),
@@ -90,6 +116,9 @@ class mono(nn.Module):
         dic_out['xz_pred'] = [[xyz[0], xyz[2]] for xyz in dic_out['xyz_pred']]
         return dic_out
 
+    '''
+    loadmodel 方法用于加载模型的权重文件，并根据需要处理或过滤权重名称后加载到模型中。
+    '''
     def loadmodel(self, filepath):
         state = torch.load(filepath)
         process_dict = OrderedDict()
@@ -213,6 +242,16 @@ class Loco(torch.nn.Module):
     """
         Modify from an existing network
     """
+    '''
+    Loco 类的主要功能如下：
+
+   初始化并加载一个基于 LocoModel 的深度学习模型。
+   支持两种模式：
+   加载预训练模型: 从指定路径加载权重。
+   初始化新模型: 创建一个新的 LocoModel 实例。
+   支持运行设备的动态选择（CPU 或 GPU）。
+   可通过 n_dropout 参数启用蒙特卡洛 Dropout（用于不确定性估计）。
+    '''
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
     LINEAR_SIZE_MONO = 256
@@ -289,6 +328,10 @@ class Loco(torch.nn.Module):
         dic_out = self.post_process(dic_out, boxes, keypoints, kk)
         return dic_out
 
+    '''
+    该方法用于计算模型的 总不确定性（Aleatoric + Epistemic Uncertainty）。
+    它通过在推理时启用 Dropout，并使用多个前向传播的输出样本，来估计 Epistemic（模型）和 Aleatoric（数据）两种不确定性。
+    '''
     def epistemic_uncertainty(self, inputs):
         """
         Apply dropout at test time to obtain combined aleatoric + epistemic uncertainty
@@ -316,9 +359,18 @@ class Loco(torch.nn.Module):
         self.model.dropout.training = False
         return varss
 
+
     @staticmethod
     def post_process(dic_in, boxes, keypoints, kk, dic_gt=None, iou_min=0.3, reorder=True, verbose=False):
         """Post process monoloco to output final dictionary with all information for visualizations"""
+        '''
+        post_process 函数的主要功能是：
+
+        匹配预测框和真实框：根据交并比 (IoU)，判断哪些预测框与真实框匹配。
+        提取关键信息：如肩部、头部和中心点坐标。
+        计算距离与置信度：将预测的深度 (distance) 转换为三维坐标，并计算预测框的置信度。
+        整理输出：将匹配信息、预测的位置信息、关键信息等合并到一个字典中，便于后续使用。
+        '''
         if len(boxes.shape) == 1:
             boxes = boxes.unsqueeze(dim=0)
         dic_out = defaultdict(list)
@@ -412,7 +464,10 @@ class Loco(torch.nn.Module):
             dic_out['xyz_real'].append(xyz_real.squeeze().tolist())
         return dic_out
 
-
+'''
+这段代码的功能是加载一组图像数据，通过 OpenPifPaf 提取人体关键点（2D姿态），
+然后使用一个三维姿态预测网络 MonoLoco 进行预测，最终输出每个目标的3D姿态信息（例如方向角）。
+'''
 def predict_new_clear_before():
     args = Args()
 
@@ -519,7 +574,13 @@ def get_args(**kws):
     kws = DefaultMunch.fromDict(kws)
     return kws
 
+'''
+predict_new_clear 是一个预测脚本，用于：
 
+加载和初始化模型与数据。
+通过预加载的关键点 (keypoints) 和边界框 (boxes) 进行推理。
+输出预测结果，包括关键点的坐标、置信度、深度信息等。
+'''
 def predict_new_clear():
     args = Args()
 
@@ -582,7 +643,16 @@ def predict_new_clear():
         break
         cnt += 1
 
+'''
+factory_from_args 是一个初始化和配置函数，用于从输入参数 (args) 中提取信息并完成：
 
+数据处理：加载图像数据路径。
+模型选择：设置关键点检测模型 (keypoints) 和单目模型 (mono)。
+设备配置：根据设备可用性设置运行环境（CPU 或 GPU）。
+可视化配置：设置图形输出的参数。
+默认参数设置：为一些可能未指定的参数提供默认值。
+外部组件配置：调用其他模块（如解码器、可视化工具）的配置方法。
+'''
 def factory_from_args(args):
     # Data
     if args.glob:
@@ -629,7 +699,19 @@ def factory_from_args(args):
 
     return args, dic_models
 
+'''
+输入处理:
+输入特征通过全连接层和批归一化，映射到隐藏层维度。
 
+内部循环:
+使用多个 MyLinearSimple 模块进行特征提取，增加网络的深度和非线性。
+
+辅助任务:
+提供额外的监督信号，帮助主任务更好地收敛。
+
+主任务输出:
+最终生成主任务的输出，结合辅助输出一起返回。
+'''
 class LocoModel(nn.Module):
 
     # change num_stage to 2
@@ -700,7 +782,18 @@ class LocoModel(nn.Module):
         y = torch.cat((y, aux), dim=1)
         return y
 
+'''
+类的结构
+构造函数 (__init__):
 
+包含两个全连接层（w1 和 w2）、对应的批归一化层（batch_norm1 和 batch_norm2）、激活函数（ReLU）和 Dropout。
+所有层的输入和输出维度均为 linear_size。
+前向传播 (forward):
+
+两次线性变换 + 批归一化 + 激活 + Dropout。
+加入残差连接，将输入直接加到最终输出上。
+
+'''
 class MyLinearSimple(nn.Module):
     def __init__(self, linear_size, p_dropout=0.5):
         super().__init__()
@@ -731,6 +824,20 @@ class MyLinearSimple(nn.Module):
         return out
 
 
+'''
+函数功能
+该函数将 2D 人体关键点的像素坐标转换为归一化的相机坐标，支持零中心化操作。
+输出是平展的 x,y 坐标，适合后续用于深度学习模型的输入。
+
+关键步骤
+中心点提取：计算目标的边界框中心点。
+坐标转换：将像素坐标转换到归一化相机坐标。
+零中心化（可选）：以目标的边界框中心点为基准，对所有关键点进行平移。
+数据整理：展平为(m,34) 的张量，便于模型处理。
+
+适用场景
+用于单目相机的 3D 人体姿态估计，尤其是从 2D 图像中提取相机坐标下的关键点输入数据。
+'''
 def preprocess_monoloco(keypoints, kk, zero_center=False):
     """ Preprocess batches of inputs
     keypoints = torch tensors of (m, 3, 17)  or list [3,17]
@@ -752,7 +859,20 @@ def preprocess_monoloco(keypoints, kk, zero_center=False):
     # kps_out = torch.cat((kps_out, keypoints[:, 2, :]), dim=1)
     return kps_out
 
+'''
+核心功能:
 
+从人体关键点中提取特定的二维坐标，如中心点、肩膀点、髋部点等。
+支持模式:
+
+包括对象的中心、底部中心、头部、肩膀、髋部和脚踝区域。
+灵活性:
+
+支持多种输入类型（列表、numpy 数组、PyTorch 张量），并自动处理批量维度。
+应用场景:
+
+常用于人体姿态估计、目标检测后处理或关键点的特征提取。
+'''
 def get_keypoints(keypoints, mode):
     """
     Extract center, shoulder or hip points of a keypoint
@@ -793,7 +913,18 @@ def get_keypoints(keypoints, mode):
 
     return kps_out  # (m, 2)
 
+'''
+功能：
+将像素坐标转换为相机坐标，输入为像素坐标 (u,v) 和深度信息 z，输出为相机坐标 (x,y,z)。
 
+关键步骤：
+填充坐标：将像素坐标扩展为三维向量(u,v,1)。
+矩阵变换：通过相机内参矩阵K^-1将像素坐标转换为归一化相机坐标。
+深度缩放：结合深度信息恢复实际的三维相机坐标。
+
+适用场景：
+用于计算 3D 点云、重建场景的三维模型、从图像中获取目标的三维位置信息等。
+'''
 def pixel_to_camera(uv_tensor, kk, z_met):
     """
     Convert a tensor in pixel coordinate to absolute camera coordinates
@@ -815,7 +946,23 @@ def pixel_to_camera(uv_tensor, kk, z_met):
 
     return xyz_met
 
+'''
+输出说明
+输出为三维世界坐标XYZ：形状为(m,3)，即每个目标的x,y,z 坐标。
 
+应用场景
+3D 目标检测：
+给定目标的深度信息（distances）和归一化图像坐标（xy_centers），将其投影到三维空间中。
+3D 跟踪：
+从视频帧提取的目标在图像中的二维位置，结合深度信息，计算三维世界坐标。
+摄像机标定与投影：
+将摄像机坐标系中的归一化点还原到真实世界中。
+
+总结
+该函数的核心任务是将图像坐标和深度信息转换为三维空间的真实世界坐标。
+使用归一化和数学公式保证转换的精确性。
+支持批量输入和多种数据格式（标量、列表、Tensor），灵活性较高。
+'''
 def xyz_from_distance(distances, xy_centers):
     """
     From distances and normalized image coordinates (z=1), extract the real world position xyz
@@ -834,7 +981,10 @@ def xyz_from_distance(distances, xy_centers):
 
     return xy_centers * distances / torch.sqrt(1 + xy_centers[:, 0:1].pow(2) + xy_centers[:, 1:2].pow(2))
 
-
+'''
+get_iou_matches 函数通过计算交并比（IoU），
+在两个边界框集合（预测边界框和真实边界框）之间找到匹配对，并返回满足最小 IoU 阈值的匹配索引。
+'''
 def get_iou_matches(boxes, boxes_gt, iou_min=0.3):
     """From 2 sets of boxes and a minimum threshold, compute the matching indices for IoU matches"""
 
@@ -858,6 +1008,15 @@ def get_iou_matches(boxes, boxes_gt, iou_min=0.3):
     return matches
 
 
+'''
+功能：计算两个矩形边界框的 IoU，用于衡量它们的重叠程度。
+关键点：
+通过交集和并集的面积计算 IoU。
+考虑了无交集的情况（交集面积为 0）。
+应用场景：
+目标检测（Object Detection）模型的性能评估（如 IoU Threshold 筛选）。
+多目标跟踪任务中，衡量预测框和真实框的匹配程度。
+'''
 def calculate_iou(box1, box2):
     # Calculate the (x1, y1, x2, y2) coordinates of the intersection of box1 and box2. Calculate its Area.
     # box1 = [-3, 8.5, 3, 11.5]
@@ -882,6 +1041,12 @@ def calculate_iou(box1, box2):
     return iou
 
 
+'''
+函数的应用场景
+在目标检测或跟踪任务中：
+统一排序：在评估或后处理阶段，按目标的空间位置对匹配结果进行排序，便于后续可视化或分析。
+消除歧义：当多个目标的匹配结果无明显顺序时，通过位置排序增加一致性。
+'''
 def reorder_matches(matches, boxes, mode='left_rigth'):
     """
     Reorder a list of (idx, idx_gt) matches based on position of the detections in the image
@@ -898,7 +1063,10 @@ def reorder_matches(matches, boxes, mode='left_rigth'):
 
     return [matches[matches_left.index(idx_boxes)] for idx_boxes in ordered_boxes if idx_boxes in matches_left]
 
-
+'''
+laplace_sampling 函数实现从一个拉普拉斯分布（Laplace Distribution）中采样多个样本。
+输入是一组分布的参数（均值和尺度），通过这些参数生成指定数量的随机样本。
+'''
 def laplace_sampling(outputs, n_samples):
     torch.manual_seed(1)
     mu = outputs[:, 0]
@@ -921,7 +1089,9 @@ def laplace_sampling(outputs, n_samples):
 
     return xx
 
-
+'''
+unnormalize_bi 的作用是根据输入的相对值对不确定性 bi 进行反归一化，返回一个新的张量，表示计算出的不确定性值。
+'''
 def unnormalize_bi(loc):
     """
     Unnormalize relative bi of a nunmpy array
@@ -932,7 +1102,10 @@ def unnormalize_bi(loc):
 
     return bi
 
-
+'''
+该函数的主要目的是从模型的输出向量中提取不同的任务预测结果，并将它们组织为一个字典 (dic_out)。
+此外，还进行了一些几何计算和校正操作，例如三维坐标的转换和方向角的校正。
+'''
 def extract_outputs(outputs, tasks=()):
     dic_out = {'x': outputs[:, 0:1],
                'y': outputs[:, 1:2],
@@ -963,7 +1136,9 @@ def extract_outputs(outputs, tasks=()):
     #     dic_out['aux'] = torch.sigmoid(dic_out['aux'])
     return dic_out
 
-
+'''
+该函数的作用是将球坐标（spherical coordinates）转换为笛卡尔坐标（cartesian coordinates）。
+'''
 def to_cartesian(rtp, mode=None):
     """convert from spherical to cartesian"""
 
@@ -991,7 +1166,10 @@ def to_cartesian(rtp, mode=None):
     z = rtp[0] * math.sin(rtp[2]) * math.sin(rtp[1])
     return [x, y, z]
 
-
+'''
+该函数的目的是对输入的方向角 (yaw) 根据目标的位置 (xyz) 进行校正。
+主要逻辑是利用三维空间中的 arctangent 计算目标的朝向补偿角，并将其加到现有的方向角上，确保方向角的范围始终在 (−π,π]。
+'''
 def back_correct_angles(yaws, xyz):
     corrections = torch.atan2(xyz[:, 0], xyz[:, 2])
     yaws = yaws + corrections.view(-1, 1)
@@ -1003,7 +1181,10 @@ def back_correct_angles(yaws, xyz):
     # assert torch.all(yaws < math.pi) & torch.all(yaws > - math.pi)
     return yaws
 
-
+'''
+这段代码的主要功能是对输入的 PifPaf（人体姿态估计模型）生成的注释信息进行预处理。
+它根据输入的关键信息（如关键点和边界框），调整边界框的大小、位置，并过滤掉不满足特定条件的框。
+'''
 def preprocess_pifpaf(annotations, im_size=None, enlarge_boxes=True, min_conf=0.3, max_area=180000):
     """
     Preprocess pif annotations:
