@@ -21,6 +21,38 @@ rgb_table = [[191, 36, 42], [255, 70, 31], [255, 181, 30], [23, 133, 170],
              [77, 34, 26], [254, 241, 67], [132, 90, 50], [65, 85, 92], [119, 32, 55]]
 
 
+'''
+#test_2view && train
+1. train_monoreid_net_with_xy_and_r
+    ├── _train_monoreid_cam_gt_centroid
+    └── _test_monoreid_cam_gt_centroid_soft_choose
+    
+#test_5view
+2. test_more_view_aggregation_net    
+    └── _test_monoreid_cam_gt_centroid_soft_choose_more_view
+
+#test_5view
+3. test_more_view_aggregation_without_fig_net
+    └── _test_monoreid_cam_gt_centroid_soft_choose_more_view_without_fig
+
+#test_real
+4. test_more_view_aggregation_cosine_similarity
+    └── _test_monoreid_cam_gt_centroid_soft_choose_more_view_without_annotation_with_pred_tracking_original_way
+'''
+
+'''
+环境初始化：
+配置 GPU 设备和随机种子。
+加载数据：
+构建多视图数据集，准备测试数据。
+模型加载：
+初始化 MonoReid 和 ReID 模型，支持断点续训。
+测试评估：
+调用测试函数 _test_monoreid_cam_gt_centroid_soft_choose_more_view 对多视图数据聚合进行评估。
+结果展示：
+输出测试结果，包括聚合性能指标和损失值。
+'''
+#test_5view
 def test_more_view_aggregation_net(cfg, training_set=None, validation_set=None):
     """
         training monoreid
@@ -89,7 +121,7 @@ def test_more_view_aggregation_net(cfg, training_set=None, validation_set=None):
     test_info = test(candidate_view_dataset, model_mono, model_reid, device, 0, cfg)
     show_aggregation_info_loss('Test', cfg.log_path, test_info)
 
-
+#test_5view
 def test_more_view_aggregation_without_fig_net(cfg, training_set=None, validation_set=None):
     """
         training monoreid
@@ -156,6 +188,18 @@ def test_more_view_aggregation_without_fig_net(cfg, training_set=None, validatio
     show_aggregation_info_loss('Test', cfg.log_path, test_info)
 
 
+
+
+'''
+这段代码的核心逻辑：
+
+准备数据和模型：加载数据集、构建模型、设置优化器。
+支持断点续训：通过配置文件选择是否从中断处恢复训练。
+训练与验证：在每轮训练后对验证集进行测试，动态调整学习率，并保存最佳模型。
+结果记录与可视化：记录损失曲线，定期保存模型参数，用于后续分析和可视化。
+'''
+#test_2view
+#train
 def train_monoreid_net_with_xy_and_r(cfg, training_set=None, validation_set=None):
     """
         training BEVSee's LonoNet and Resnet-50 (train ReID by self supervised way)
@@ -346,6 +390,16 @@ def train_monoreid_net_with_xy_and_r(cfg, training_set=None, validation_set=None
             draw_more_line_fig_key_from_dict(test_r_prob_dict_loss, filepath, False)
 
 
+
+'''
+这段代码的核心功能是通过多视角聚合数据计算余弦相似性，并评估模型的聚合性能，具体表现为：
+
+多视角数据加载与处理：动态调整视角数量，加载多视角组合。
+无标注测试：通过余弦相似性计算，测试多视角数据的聚合效果。
+结果记录与输出：记录每个视角组合的相似性结果，保存到文件并打印。
+测试流程的重点是多视角数据的动态聚合，以及基于余弦相似性的相似度评价。
+'''
+#test_real
 def test_more_view_aggregation_cosine_similarity(cfg, training_set=None, validation_set=None):
     os.environ['CUDA_VISIBLE_DEVICES'] = cfg.device_list
 
@@ -478,6 +532,33 @@ def test_more_view_aggregation_cosine_similarity(cfg, training_set=None, validat
         print(f' View {key}: {sum(val_list) / len(val_list)} ')
 
 
+'''
+MonoReid 模型训练：
+
+结合几何对齐和伪监督策略，优化相机位置和朝向的预测能力。
+跨视角行人关联：
+
+利用 ReID 特征匹配矩阵和伪监督矩阵，优化跨视角行人关联能力。
+联合优化框架：
+
+通过总损失整合位姿估计和 ReID 两个任务，实现联合训练。
+
+为什么联合优化两个模型？
+在这段代码中，LocoNet 和 ResNet-50 模块虽然分别负责不同的任务（位姿估计和行人重识别），但它们之间存在以下联系：
+
+几何对齐（SAM 模块）：
+
+ResNet-50 提取的特征相似性矩阵用于指导几何对齐过程（如相机位置估计）。
+LocoNet 提供的位姿信息（xz_pred 和 angles）用于重新构造伪监督矩阵，优化 ResNet-50。
+伪监督策略：
+
+LocoNet 的预测（相机位姿）为 ResNet-50 生成伪监督信号（matrix_pseudo）。
+ResNet-50 的特征相似性矩阵指导 LocoNet 在几何对齐中的匹配对选择（selected_pair_list）。
+联合优化的好处：
+
+两个模块的训练是协同的：LocoNet 的改进能够生成更准确的伪标签，进而优化 ResNet-50；而 ResNet-50 的特征匹配能够提升几何对齐的精度，从而优化 LocoNet。
+'''
+#train_monoreid_net_with_xy_and_r
 def _train_monoreid_cam_gt_centroid(data_loader, model_mono, model_reid, device, optimizer, epoch, cfg):
     cfg.epoch = epoch
 
@@ -646,7 +727,22 @@ def _train_monoreid_cam_gt_centroid(data_loader, model_mono, model_reid, device,
     }
     return train_info
 
+'''
+核心功能
+位姿估计（Pose Estimation）：
 
+通过几何对齐（旋转和位移计算）来估计相机在 BEV（Bird’s Eye View）平面中的位置和朝向。
+跨视角行人关联（ReID）：
+
+使用 ReID 模块提取特征，并构造匹配矩阵进行相似性计算。
+伪监督学习：
+
+生成伪监督矩阵（matrix_pseudo），作为监督信号来优化跨视角行人关联任务。
+联合优化：
+
+将位姿估计损失和 ReID 损失整合为一个总损失函数，共同优化 MonoReid 和 ReID 模块。
+'''
+#train_monoreid_net_with_xy_and_r和上一个函数重了？
 def _train_monoreid_cam_gt_centroid(data_loader, model_mono, model_reid, device, optimizer, epoch, cfg):
     # Input augmented data,
     # train vindicator
@@ -841,7 +937,19 @@ def _train_monoreid_cam_gt_centroid(data_loader, model_mono, model_reid, device,
     }
     return train_info
 
+'''
+这段代码实现了 测试函数 _test_monoreid_cam_gt_centroid_soft_choose，主要用于评估 MonoReid 和 ReID 模型的性能，包括以下功能：
 
+位姿估计测试：
+评估 MonoReid 模块对相机位置和朝向预测的精度。
+跨视角行人关联测试：
+使用 ReID 模块的特征匹配矩阵进行行人关联测试。
+性能指标计算：
+包括总损失、交并比 (IOU)、准确率 (Precision)、召回率 (Recall)、F1 分数等。
+结果可视化：
+将预测结果与真实值投影到鸟瞰图 (BEV) 上，并保存可视化图像以便分析。
+'''
+#train_monoreid_net_with_xy_and_r
 def _test_monoreid_cam_gt_centroid_soft_choose(data_loader, model_mono, model_reid, device, epoch, cfg):
     cfg.epoch = epoch
     if cfg.matrix_threshold > 0.5:
@@ -1297,6 +1405,16 @@ def _test_monoreid_cam_gt_centroid_soft_choose(data_loader, model_mono, model_re
         return test_info
 
 
+'''
+这段代码实现了一个测试函数 _test_monoreid_cam_gt_centroid_soft_choose_more_view_without_annotation_with_pred_tracking_original_way，其目标是 在多视角下进行行人重识别（ReID）与相机位姿估计，并通过对多个视角的数据进行融合，计算整体的匹配结果和性能指标，包括：
+
+多视角数据对齐；
+行人重识别（ReID）特征计算；
+相机位置和角度预测；
+多视角特征的聚合与目标统计；
+计算自距离矩阵的余弦相似度作为评估指标。
+'''
+#test_more_view_aggregation_cosine_similarity
 def _test_monoreid_cam_gt_centroid_soft_choose_more_view_without_annotation_with_pred_tracking_original_way(
         view_candidate_dataset_list, model_mono, model_reid, device, epoch, cfg,
         time_extra=''.join(str(time.time()).split('.'))):
@@ -2025,6 +2143,16 @@ def _test_monoreid_cam_gt_centroid_soft_choose_more_view_without_annotation_with
         return test_info
 
 
+
+'''
+这段代码完成了多视角数据的行人重识别与位姿预测测试，包括：
+
+特征提取与匹配：使用 Re-ID 模型提取特征，并计算匹配关系。
+几何对齐与聚合：通过旋转和平移，将多视角的点对齐并聚合为全局坐标。
+性能评估：计算 F1 分数、位姿损失等指标。
+可视化：生成顶视图以展示聚合效果。
+'''
+#test_more_view_aggregation_net
 def _test_monoreid_cam_gt_centroid_soft_choose_more_view(view_candidate_dataset_list, model_mono, model_reid, device,
                                                          epoch, cfg):
     # Input augmented data,
@@ -2986,7 +3114,20 @@ def _test_monoreid_cam_gt_centroid_soft_choose_more_view(view_candidate_dataset_
 
         return test_info
 
+'''
+功能模块：
 
+单视图位姿预测（model_mono）。
+多视角 Re-ID 匹配（model_reid）。
+位姿对齐（旋转与平移）。
+点聚合与结果评估。
+核心逻辑：
+
+每帧对齐多视角预测结果，并计算损失与匹配精度。
+通过质心选择优化聚合效果。
+输出综合评估指标（损失、F1 分数等）。
+'''
+#test_more_view_aggregation_without_fig_net
 def _test_monoreid_cam_gt_centroid_soft_choose_more_view_without_fig(view_candidate_dataset_list, model_mono,
                                                                      model_reid, device, epoch, cfg):
     cfg.epoch = epoch
