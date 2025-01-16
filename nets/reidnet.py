@@ -9,7 +9,10 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-
+'''
+该代码实现了一个行人重识别（ReID）模型 reidnet，其核心组件是基于ResNet50构建的网络。
+该模型通过 forward 方法进行前向传播，接收图像输入，输出特征。并提供了一个 loadmodel 方法，允许从文件加载训练好的权重，方便恢复和使用训练好的模型。
+'''
 # only accept 256, 128
 class reidnet(torch.nn.Module):
     def __init__(self):
